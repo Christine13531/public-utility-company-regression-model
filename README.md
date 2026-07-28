@@ -1,119 +1,101 @@
-# AFM 244 – Week 10 Quiz: Seasonal Regression Analysis
+# AFM 244 – Week 11 Quiz: Target Corp. Quarterly Revenue Regression
 
 **Author:** Christine Miao
-**Platform:** Google Colab (exported to PDF)
+**Platform:** Google Colab / Jupyter Notebook
+**Prepared for (in-notebook memo):** Chapman Wealth Management (via QuantFolio Solutions)
 
 ## Overview
 
-This notebook builds and evaluates two Ordinary Least Squares (OLS) regression
-models that forecast **revenue** from **production**, using seasonal dummy
-variables (and dummy-interaction terms) to test whether the revenue/production
-relationship differs by season. One model isolates a **winter** effect, the
-other isolates a **fall** effect.
-
-> I'm not fully certain of every step, since the PDF's text layer was
-> corrupted/garbled on export and I could only reliably read the portions that
-> rendered as images (code cells, computed equations, and printed metrics).
-> You may want to verify against the live Colab notebook for the full
-> narrative/markdown commentary.
+This notebook builds a time-trend regression model with two seasonal/event
+dummy variables to explain and forecast **Target Corporation's (TGT)**
+quarterly revenue. It combines the code/analysis with a client-facing
+memorandum summarizing the findings.
 
 ## Data
 
-Two dataframes are used:
+- **Source file:** `qSales_2024.csv`
+- Filtered to `tic == 'TGT'` (Target Corp), giving **93 quarterly observations**
+  from **2001-01-31 to 2024-01-31** (fiscal quarters).
+- Key columns used: `datadate`, `fqtr` (fiscal quarter), `datacqtr` (calendar
+  quarter, e.g. `2020Q2`), `saleq` (quarterly revenue, $M).
 
-- `dt4training` — training data
-- `dt4testing` — holdout data for out-of-sample assessment
+## Feature Engineering
 
-Columns visible in the data preview:
-
-| Column | Description |
+| Variable | Definition |
 |---|---|
-| `type` | dataset/segment label (e.g. `dt4testing`) |
-| `date` | monthly date |
-| `revenue` | dependent variable |
-| `production` | primary independent variable |
-| `coolDD` / `heatDD` | cooling/heating degree-days |
-| `winter_DV` | dummy variable, 1 if winter month |
-| `fall_DV` | dummy variable, 1 if fall month |
-| `winter_interaction` | `production × winter_DV` |
-| `fall_interaction` | `production × fall_DV` |
+| `time` | Sequential index, 1 to 93, representing quarter order |
+| `holiday_dv` | 1 if fiscal Q4 (Nov 1–Jan 31, the holiday shopping quarter), else 0 |
+| `holiday_interaction` | `time × holiday_dv` |
+| `postCovid_dv` | 1 if `datacqtr >= 2020Q2`, else 0 |
+| `postCovid_interaction` | `time × postCovid_dv` |
 
-## Methodology
+**Note on train/test split:** The notebook explicitly decided *against* a
+75/25 train-test split, since only ~16.13% of the data (15 of 93 rows) falls
+in the post-COVID period — a split would have left too few post-COVID rows
+to train on. The **full dataset** was used to fit the model instead.
 
-Both models are fit with `statsmodels.api.OLS` (`sm.OLS(y, x).fit()`), using
-`production`, a seasonal dummy, and the corresponding interaction term as
-predictors (plus a constant added via `sm.add_constant`).
+## Model
 
-### Model 1 — Winter model
+Fit via `statsmodels.api.OLS` with a constant, `time`, both dummies, and both
+interaction terms as predictors:
 
 ```
-revenue = 5,629,257.08 + 13.51 × production
-                       + 14.16 × production × winter
-                       − 201,742.73 × winter
+TargetRevenue = 9,744.83
+              + 123.92 × time
+              + 3,955.93 × holiday
+              + 16.95   × (time × holiday)
+              − 2,659.14 × postCovid
+              + 84.20   × (time × postCovid)
 ```
 
-Split into two implied equations:
+**Fit quality:** Adjusted R² = **0.953** — the model explains ~95.3% of
+quarter-to-quarter revenue variation.
 
-- **Non-winter months:** `revenue = 5,629,257.08 + 13.51 × production`
-- **Winter months:** `revenue = 5,427,514.35 + 27.67 × production`
+## Prediction & Confidence Intervals
 
-**Performance (on `dt4testing`):**
-- MAPE: **15.90%**
-- Adjusted R²: **0.7518**
+Using `model.get_prediction(x).summary_frame(alpha=0.2)`, the notebook
+generates fitted values plus an **80% confidence interval** (`obs_ci_lower`,
+`obs_ci_upper`) for each quarter, then plots:
+- Actual revenue (solid line, circle markers)
+- Predicted revenue (dashed orange line, x markers)
+- Shaded 80% CI band around the prediction
 
-### Model 2 — Fall model
+The CI band width is roughly **$3,200M** consistently, and actual values
+generally fall within it.
 
-```
-revenue = 6,118,386.30 + 18.30 × production
-                       − 7.67 × production × fall
-                       − 477,240.43 × fall
-```
+## Key Findings (from the in-notebook memo)
 
-Split into two implied equations:
+- **Holiday effect (`holiday_dv`):** Q4 revenue jumps by **$3,955.93M** versus
+  other quarters, attributed to holiday shopping season; the interaction term
+  (+16.95/quarter) suggests this seasonal lift has grown only modestly over
+  time.
+- **Post-COVID effect (`postCovid_dv`):** Captures an elevated revenue level
+  starting 2020 Q2, linked to accelerated e-commerce/digital adoption
+  (online shopping, curbside pickup). Revenue has **stayed elevated** rather
+  than reverting, through the most recent data point (2023 Q4).
+- **Overall trend:** Revenue is both cyclical (Q4 spikes) and structurally
+  growing over the 23-year window.
 
-- **Non-fall months:** `revenue = 6,118,386.30 + 18.30 × production`
-- **Fall months:** `revenue = 5,641,145.87 + 10.63 × production`
+## Recommendations (from the memo)
 
-**Performance (on `dt4testing`):**
-- MAPE: **22.02%**
-- Adjusted R²: **0.4514**
-
-## Evaluation Approach
-
-For each model, the notebook:
-1. Builds the test design matrix (`production`, seasonal dummy, interaction) with a constant.
-2. Generates predictions with `model.predict(...)`.
-3. Computes **Mean Absolute Percentage Error (MAPE)**:
-   `mean(abs((actual − predicted) / actual)) × 100`.
-4. Reports the model's **adjusted R²** (`model.rsquared_adj`).
-
-## Visualization
-
-Each model is plotted with `matplotlib`:
-- A scatter plot of actual `production` vs. `revenue`.
-- Two fitted lines derived from the model coefficients — one for the season
-  in question (e.g. winter) and one for the rest of the year — overlaid in
-  different colors (e.g. red = non-winter, blue = winter) to visually compare
-  slopes/intercepts.
-
-## Key Takeaway
-
-The **winter model fits noticeably better** than the fall model (lower MAPE,
-higher adjusted R²), suggesting the winter dummy/interaction captures a more
-meaningful shift in the production–revenue relationship than the fall dummy
-does — though I'd treat the fall model's weaker R² (0.4514) as a sign that
-season alone may not explain much of the variation in fall revenue.
+1. **Conduct qualitative analysis** — supplement the numbers with insight
+   from investor relations material (earnings calls, quarterly reports).
+2. **Analyze other business metrics** — revenue alone doesn't capture
+   operational health; compare profitability, liquidity, efficiency, and
+   solvency ratios against industry benchmarks.
+3. **Forecast cautiously** — the post-COVID lift is a relatively recent,
+   unproven-as-permanent shift; don't assume it persists indefinitely without
+   monitoring current developments.
 
 ## Tools/Libraries Used
 
-- `pandas` — data handling
-- `statsmodels` (`sm.OLS`, `sm.add_constant`) — regression modeling
-- `matplotlib` (`plt`) — scatter/line plots
+- `pandas`, `numpy` — data handling
+- `statsmodels` (`sm.OLS`, `get_prediction`) — regression + prediction intervals
+- `matplotlib` — actual-vs-predicted visualization with confidence band
 
-## Suggested Verification
+## Deliverable Format
 
-Because of the PDF export issue described above, I'd recommend re-checking
-the original Colab notebook directly for:
-- Any written interpretation/commentary in markdown cells
-- The exact number of rows/months in `dt4training` vs. `dt4testing`
-- Any additional quiz questions or written answers not captured here
+The notebook concludes with a formatted **memorandum** (To/From/CC/Date/Re
+header, Scope, Methodology, Key Findings, Recommendations) addressed to
+Chapman Wealth Management, framing the regression results as investment
+due-diligence input.
